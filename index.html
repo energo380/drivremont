@@ -61,6 +61,14 @@ body {
 }
 .input-group input:focus { outline: none; border-color: #f39c12; }
 .input-group input::placeholder { color: #888; }
+.pass-field { position: relative; }
+.input-group .pass-field input { padding-right: 96px; }
+.pass-eye {
+    position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+    border: 0; background: none; padding: 8px 10px; border-radius: 8px;
+    font: inherit; font-size: 13px; color: #aaa; cursor: pointer;
+}
+.pass-eye:hover { color: #fff; }
 
 /* ---------- Кнопки ---------- */
 .btn {
@@ -402,7 +410,10 @@ td select option { background: #1a1a2e; color: #fff; }
         <p>Заявки на ремонт электродвигателей</p>
         <div class="input-group">
             <label for="password">Пароль</label>
-            <input type="password" id="password" placeholder="Введите пароль" autocomplete="current-password">
+            <div class="pass-field">
+                <input type="password" id="password" placeholder="Введите пароль" autocomplete="current-password">
+                <button type="button" class="pass-eye" id="passEye" aria-pressed="false" aria-controls="password">Показать</button>
+            </div>
         </div>
         <button class="btn btn-primary" id="loginBtn" onclick="login()">Войти</button>
     </div>
@@ -802,6 +813,7 @@ function logout() {
     document.getElementById('logoContainer').style.display = 'none';
     document.getElementById('settingsBtn').style.display = 'none';
     document.getElementById('password').value = '';
+    setPassVisible(false);
 }
 
 /* ============================================================
@@ -1682,6 +1694,18 @@ function refreshFormSelects() {
 /* ============================================================
    БЛОК 12: ИНИЦИАЛИЗАЦИЯ
    ============================================================ */
+
+/* Показать / скрыть пароль на форме входа — как на сайте АВР */
+function setPassVisible(show) {
+    var i = document.getElementById('password'), b = document.getElementById('passEye');
+    i.type = show ? 'text' : 'password';
+    b.textContent = show ? 'Скрыть' : 'Показать';
+    b.setAttribute('aria-pressed', String(show));
+}
+document.getElementById('passEye').addEventListener('click', function () {
+    setPassVisible(document.getElementById('password').type === 'password');
+    document.getElementById('password').focus();
+});
 
 document.addEventListener('DOMContentLoaded', function () {
     document.getElementById('password').addEventListener('keypress', function (e) {
