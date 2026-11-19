@@ -1,14 +1,16 @@
 <!DOCTYPE html>
 <!-- ============================================================
      ЗАЯВКИ НА РЕМОНТ ЭЛЕКТРОДВИГАТЕЛЕЙ
-     Клиентская часть. Версия 3.0
-     Требует серверный скрипт Code.gs версии 3.0
+     Клиентская часть. Версия 3.1 (оформление в стиле электродвигателей)
+     Требует серверный скрипт Code.gs версии 3.0 или новее
      ============================================================ -->
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Заявки на ремонт электродвигателей</title>
+<meta name="theme-color" content="#1a1a2e">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23f39c12'/%3E%3Cstop offset='1' stop-color='%23e74c3c'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' fill='url(%23g)'/%3E%3Cg fill='%23fff' transform='translate(6.8 4.2) scale(2.25)'%3E%3Cpath d='M1 10.8h4.2v2.4H1z M4.7 8.4h1.1v7.2H4.7z M17.6 8h2.1a1.7 1.7 0 0 1 1.7 1.7v4.6a1.7 1.7 0 0 1-1.7 1.7h-2.1z M9.4 4.2h5v2.3h-5z M7.2 17.5h2.5v1.6H7.2z M13.4 17.5h2.5v1.6h-2.5z M5.6 19.1h12.2v1.4H5.6z'/%3E%3Cpath fill-rule='evenodd' d='M7.5 7h8.4a1.5 1.5 0 0 1 1.5 1.5v7a1.5 1.5 0 0 1-1.5 1.5H7.5A1.5 1.5 0 0 1 6 15.5v-7A1.5 1.5 0 0 1 7.5 7z M7.6 9.6h8.2v1.5H7.6z M7.6 12.9h8.2v1.5H7.6z'/%3E%3C/g%3E%3C/svg%3E">
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -402,24 +404,223 @@ td select option { background: #1a1a2e; color: #fff; }
 /* кнопка «Сервисы» — возврат в общее меню */
 #loginScreen { flex-direction: column; gap: 22px; }
 </style>
+<style id="motor-theme">
+/* ============================================================
+   ГРАФИКА: электродвигатели, шестерни, статор
+   ============================================================ */
+.login-screen, .main-screen { position: relative; z-index: 1; }
+
+/* ---------- Фон: сетка чертежа, шестерни, разрез статора ---------- */
+.bg-deco {
+    position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden;
+    background-image:
+        linear-gradient(rgba(255,255,255,0.028) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.028) 1px, transparent 1px);
+    background-size: 40px 40px;
+    transition: opacity 0.4s;
+}
+.deco-anchor { position: absolute; width: 0; height: 0; }
+.deco-tr { top: 0; right: 0; }
+.deco-bl { left: 0; bottom: 0; }
+.gear-pos { position: absolute; }
+
+.deco-gear { display: block; animation: deco-spin 120s linear infinite; }
+.deco-gear.gear-b { animation-duration: 60s; animation-direction: reverse; }
+.deco-gear .g-body { fill: rgba(243,156,18,0.05); stroke: rgba(243,156,18,0.32); stroke-width: 1.5; }
+.deco-gear .g-line { fill: none; stroke: rgba(243,156,18,0.22); stroke-width: 1; stroke-dasharray: 4 6; }
+.deco-gear .g-dot  { fill: rgba(243,156,18,0.35); }
+
+.stator-pos { position: absolute; left: -90px; top: -270px; width: 360px; height: 360px; }
+.deco-stator, .deco-rotor { position: absolute; left: 0; top: 0; display: block; }
+.deco-rotor { animation: deco-spin 14s linear infinite; }
+.s-fin   { stroke: rgba(255,255,255,0.13); stroke-width: 3; stroke-linecap: round; }
+.s-yoke  { fill: rgba(255,255,255,0.03); stroke: rgba(255,255,255,0.18); stroke-width: 1.5; }
+.s-bore  { fill: rgba(22,33,62,0.6); stroke: rgba(255,255,255,0.14); stroke-width: 1; }
+.s-ph-a  { fill: rgba(243,156,18,0.38); }
+.s-ph-b  { fill: rgba(231,76,60,0.34); }
+.s-ph-c  { fill: rgba(201,209,224,0.22); }
+.s-bolt  { fill: none; stroke: rgba(255,255,255,0.22); stroke-width: 1.5; }
+.r-core  { fill: rgba(255,255,255,0.04); stroke: rgba(255,255,255,0.2); stroke-width: 1.2; }
+.r-bar   { fill: rgba(243,156,18,0.32); }
+.r-ring  { fill: none; stroke: rgba(255,255,255,0.14); stroke-dasharray: 3 5; }
+.r-shaft { fill: rgba(201,209,224,0.28); }
+.r-key   { fill: rgba(22,33,62,0.95); }
+
+@keyframes deco-spin { to { transform: rotate(360deg); } }
+
+/* После входа фон спокойнее и не крутится — не отвлекает от формы */
+.app-on .bg-deco { opacity: 0.45; }
+.app-on .spin-deco { animation-play-state: paused; }
+
+/* ---------- Экран входа ---------- */
+.login-box {
+    position: relative; overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.08);
+}
+.login-box::before {
+    content: ''; position: absolute; left: 0; top: 0; right: 0; height: 3px;
+    background: linear-gradient(90deg, #f39c12, #e74c3c);
+}
+.login-hero {
+    display: block; width: 100%; height: auto; margin: -12px auto 8px;
+    filter: drop-shadow(0 10px 18px rgba(0,0,0,0.35));
+}
+.hero-flow { stroke-dasharray: 5 16; animation: hero-flow 1.1s linear infinite; }
+@keyframes hero-flow { to { stroke-dashoffset: 21; } }
+.hero-rot { animation: hero-pulse 2.4s ease-in-out infinite; }
+@keyframes hero-pulse { 0%,100% { opacity: 0.95; } 50% { opacity: 0.35; } }
+.login-box p { margin-bottom: 12px; }
+#loginBtn { justify-content: center; }
+.hero-specs {
+    display: flex; justify-content: center; gap: 8px; flex-wrap: wrap;
+    margin-bottom: 24px;
+}
+.hero-specs span {
+    font-size: 12px; padding: 4px 10px; border-radius: 20px;
+    border: 1px solid rgba(243,156,18,0.45); color: #f5b041;
+    background: rgba(243,156,18,0.08); letter-spacing: 0.3px; white-space: nowrap;
+}
+
+/* ---------- Значки ---------- */
+.logo-ico { width: 32px; height: 32px; color: #fff; display: block; }
+.hdr-icon {
+    width: 36px; height: 36px; color: #f39c12; flex: none;
+    filter: drop-shadow(0 2px 6px rgba(243,156,18,0.35));
+}
+.empty-inner { display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100%; }
+.empty-ico { width: 64px; height: 64px; color: rgba(243,156,18,0.45); }
+
+/* ---------- Загрузка: вращается шестерня внутри статора ---------- */
+.spinner-wrap {
+    width: 88px; height: 88px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    border: 3px solid rgba(255,255,255,0.16);
+    box-shadow: inset 0 0 0 9px rgba(243,156,18,0.08), 0 0 30px rgba(243,156,18,0.15);
+}
+.loading .spinner {
+    width: 58px; height: 58px; border: none; border-radius: 0;
+    color: #f39c12;
+}
+.loading .spinner svg { display: block; width: 100%; height: 100%; }
+
+@media (max-width: 768px) {
+    .deco-tr { transform: scale(0.6); transform-origin: top right; }
+    .deco-bl { transform: scale(0.6); transform-origin: bottom left; }
+    .logo-ico { width: 26px; height: 26px; }
+    .hdr-icon { width: 28px; height: 28px; }
+}
+
+/* Уменьшение анимации: декоративное вращение просто выключаем */
+@media (prefers-reduced-motion: reduce) {
+    .spin-deco, .hero-flow, .hero-rot { animation: none !important; }
+}
+</style>
 </head>
 
 <body>
 
+<!-- Значки (используются через <use href="#...">) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <defs>
+        <symbol id="ico-motor" viewBox="0 0 24 24">
+            <path fill="currentColor" d="M1 10.8h4.2v2.4H1z M4.7 8.4h1.1v7.2H4.7z M17.6 8h2.1a1.7 1.7 0 0 1 1.7 1.7v4.6a1.7 1.7 0 0 1-1.7 1.7h-2.1z M9.4 4.2h5v2.3h-5z M7.2 17.5h2.5v1.6H7.2z M13.4 17.5h2.5v1.6h-2.5z M5.6 19.1h12.2v1.4H5.6z"/>
+            <path fill="currentColor" fill-rule="evenodd" d="M7.5 7h8.4a1.5 1.5 0 0 1 1.5 1.5v7a1.5 1.5 0 0 1-1.5 1.5H7.5A1.5 1.5 0 0 1 6 15.5v-7A1.5 1.5 0 0 1 7.5 7z M7.6 9.2h8.2v1H7.6z M7.6 11.5h8.2v1H7.6z M7.6 13.8h8.2v1H7.6z"/>
+        </symbol>
+        <symbol id="ico-gear" viewBox="0 0 24 24">
+            <path fill="currentColor" fill-rule="evenodd" d="M10 4.7 L10.9 4.5 L11.2 0.8 L12.8 0.8 L13.1 4.5 L14 4.7 L14.8 4.9 L16.9 1.9 L18.2 2.7 L16.7 6 L17.4 6.6 L18 7.3 L21.3 5.8 L22.1 7.1 L19.1 9.2 L19.3 10 L19.5 10.9 L23.2 11.2 L23.2 12.8 L19.5 13.1 L19.3 14 L19.1 14.8 L22.1 16.9 L21.3 18.2 L18 16.7 L17.4 17.4 L16.7 18 L18.2 21.3 L16.9 22.1 L14.8 19.1 L14 19.3 L13.1 19.5 L12.8 23.2 L11.2 23.2 L10.9 19.5 L10 19.3 L9.2 19.1 L7.1 22.1 L5.8 21.3 L7.3 18 L6.6 17.4 L6 16.7 L2.7 18.2 L1.9 16.9 L4.9 14.8 L4.7 14 L4.5 13.1 L0.8 12.8 L0.8 11.2 L4.5 10.9 L4.7 10 L4.9 9.2 L1.9 7.1 L2.7 5.8 L6 7.3 L6.6 6.6 L7.3 6 L5.8 2.7 L7.1 1.9 L9.2 4.9 Z M8.4 12 a3.6 3.6 0 1 0 7.2 0 a3.6 3.6 0 1 0 -7.2 0 Z"/>
+        </symbol>
+    </defs>
+</svg>
+
+<!-- Фон: шестерни и разрез статора -->
+<div class="bg-deco" aria-hidden="true">
+    <div class="deco-anchor deco-tr">
+        <div class="gear-pos" style="left:-244px; top:-144px;"><svg class="deco-gear gear-a spin-deco" width="368" height="368" viewBox="0 0 368 368" aria-hidden="true"><path d="M92.4 303.4 L85.4 297.7 L59.8 317 L51 308.2 L70.3 282.6 L64.6 275.6 L59.3 268.3 L29.6 280.3 L23.4 269.6 L48.7 249.9 L45 241.6 L41.7 233.1 L9.9 237.1 L6.7 225.1 L36.2 212.6 L34.8 203.6 L33.9 194.6 L2.1 190.2 L2.1 177.8 L33.9 173.4 L34.8 164.4 L36.2 155.4 L6.7 142.9 L9.9 130.9 L41.7 134.9 L45 126.4 L48.7 118.1 L23.4 98.4 L29.6 87.7 L59.3 99.7 L64.6 92.4 L70.3 85.4 L51 59.8 L59.8 51 L85.4 70.3 L92.4 64.6 L99.7 59.3 L87.7 29.6 L98.4 23.4 L118.1 48.7 L126.4 45 L134.9 41.7 L130.9 9.9 L142.9 6.7 L155.4 36.2 L164.4 34.8 L173.4 33.9 L177.8 2.1 L190.2 2.1 L194.6 33.9 L203.6 34.8 L212.6 36.2 L225.1 6.7 L237.1 9.9 L233.1 41.7 L241.6 45 L249.9 48.7 L269.6 23.4 L280.3 29.6 L268.3 59.3 L275.6 64.6 L282.6 70.3 L308.2 51 L317 59.8 L297.7 85.4 L303.4 92.4 L308.7 99.7 L338.4 87.7 L344.6 98.4 L319.3 118.1 L323 126.4 L326.3 134.9 L358.1 130.9 L361.3 142.9 L331.8 155.4 L333.2 164.4 L334.1 173.4 L365.9 177.8 L365.9 190.2 L334.1 194.6 L333.2 203.6 L331.8 212.6 L361.3 225.1 L358.1 237.1 L326.3 233.1 L323 241.6 L319.3 249.9 L344.6 269.6 L338.4 280.3 L308.7 268.3 L303.4 275.6 L297.7 282.6 L317 308.2 L308.2 317 L282.6 297.7 L275.6 303.4 L268.3 308.7 L280.3 338.4 L269.6 344.6 L249.9 319.3 L241.6 323 L233.1 326.3 L237.1 358.1 L225.1 361.3 L212.6 331.8 L203.6 333.2 L194.6 334.1 L190.2 365.9 L177.8 365.9 L173.4 334.1 L164.4 333.2 L155.4 331.8 L142.9 361.3 L130.9 358.1 L134.9 326.3 L126.4 323 L118.1 319.3 L98.4 344.6 L87.7 338.4 L99.7 308.7 Z M150 184 a34 34 0 1 0 68 0 a34 34 0 1 0 -68 0 Z M79.7 258.1 A128 128 0 0 1 56.6 172 L132.2 179.1 A52 52 0 0 0 141.6 214.1 Z M67.6 130.7 A128 128 0 0 1 130.7 67.6 L162.4 136.7 A52 52 0 0 0 136.7 162.4 Z M172 56.6 A128 128 0 0 1 258.1 79.7 L214.1 141.6 A52 52 0 0 0 179.1 132.2 Z M288.3 109.9 A128 128 0 0 1 311.4 196 L235.8 188.9 A52 52 0 0 0 226.4 153.9 Z M300.4 237.3 A128 128 0 0 1 237.3 300.4 L205.6 231.3 A52 52 0 0 0 231.3 205.6 Z M196 311.4 A128 128 0 0 1 109.9 288.3 L153.9 226.4 A52 52 0 0 0 188.9 235.8 Z" fill-rule="evenodd" class="g-body"/><circle cx="184" cy="184" r="144.5" class="g-line"/><circle cx="157.8" cy="210.2" r="7.5" class="g-dot"/></svg></div>
+        <div class="gear-pos" style="left:-338.2px; top:118.2px;"><svg class="deco-gear gear-b spin-deco" width="200" height="200" viewBox="0 0 200 200" aria-hidden="true"><path d="M147 53 L152.3 59 L181.3 45.3 L188 56.9 L161.7 75.2 L164.2 82.8 L165.8 90.6 L197.8 93.3 L197.8 106.7 L165.8 109.4 L164.2 117.2 L161.7 124.8 L188 143.1 L181.3 154.7 L152.3 141 L147 147 L141 152.3 L154.7 181.3 L143.1 188 L124.8 161.7 L117.2 164.2 L109.4 165.8 L106.7 197.8 L93.3 197.8 L90.6 165.8 L82.8 164.2 L75.2 161.7 L56.9 188 L45.3 181.3 L59 152.3 L53 147 L47.7 141 L18.7 154.7 L12 143.1 L38.3 124.8 L35.8 117.2 L34.2 109.4 L2.2 106.7 L2.2 93.3 L34.2 90.6 L35.8 82.8 L38.3 75.2 L12 56.9 L18.7 45.3 L47.7 59 L53 53 L59 47.7 L45.3 18.7 L56.9 12 L75.2 38.3 L82.8 35.8 L90.6 34.2 L93.3 2.2 L106.7 2.2 L109.4 34.2 L117.2 35.8 L124.8 38.3 L143.1 12 L154.7 18.7 L141 47.7 Z M82 100 a18 18 0 1 0 36 0 a18 18 0 1 0 -36 0 Z" fill-rule="evenodd" class="g-body"/><circle cx="118.2" cy="89.5" r="4" class="g-dot"/></svg></div>
+    </div>
+    <div class="deco-anchor deco-bl">
+        <div class="stator-pos"><svg class="deco-stator" width="360" height="360" viewBox="0 0 360 360" aria-hidden="true"><line x1="330" y1="180" x2="348" y2="180" class="s-fin"/><line x1="327.7" y1="206" x2="345.4" y2="209.2" class="s-fin"/><line x1="321" y1="231.3" x2="337.9" y2="237.5" class="s-fin"/><line x1="309.9" y1="255" x2="325.5" y2="264" class="s-fin"/><line x1="294.9" y1="276.4" x2="308.7" y2="288" class="s-fin"/><line x1="276.4" y1="294.9" x2="288" y2="308.7" class="s-fin"/><line x1="255" y1="309.9" x2="264" y2="325.5" class="s-fin"/><line x1="231.3" y1="321" x2="237.5" y2="337.9" class="s-fin"/><line x1="206" y1="327.7" x2="209.2" y2="345.4" class="s-fin"/><line x1="180" y1="330" x2="180" y2="348" class="s-fin"/><line x1="154" y1="327.7" x2="150.8" y2="345.4" class="s-fin"/><line x1="128.7" y1="321" x2="122.5" y2="337.9" class="s-fin"/><line x1="105" y1="309.9" x2="96" y2="325.5" class="s-fin"/><line x1="83.6" y1="294.9" x2="72" y2="308.7" class="s-fin"/><line x1="65.1" y1="276.4" x2="51.3" y2="288" class="s-fin"/><line x1="50.1" y1="255" x2="34.5" y2="264" class="s-fin"/><line x1="39" y1="231.3" x2="22.1" y2="237.5" class="s-fin"/><line x1="32.3" y1="206" x2="14.6" y2="209.2" class="s-fin"/><line x1="30" y1="180" x2="12" y2="180" class="s-fin"/><line x1="32.3" y1="154" x2="14.6" y2="150.8" class="s-fin"/><line x1="39" y1="128.7" x2="22.1" y2="122.5" class="s-fin"/><line x1="50.1" y1="105" x2="34.5" y2="96" class="s-fin"/><line x1="65.1" y1="83.6" x2="51.3" y2="72" class="s-fin"/><line x1="83.6" y1="65.1" x2="72" y2="51.3" class="s-fin"/><line x1="105" y1="50.1" x2="96" y2="34.5" class="s-fin"/><line x1="128.7" y1="39" x2="122.5" y2="22.1" class="s-fin"/><line x1="154" y1="32.3" x2="150.8" y2="14.6" class="s-fin"/><line x1="180" y1="30" x2="180" y2="12" class="s-fin"/><line x1="206" y1="32.3" x2="209.2" y2="14.6" class="s-fin"/><line x1="231.3" y1="39" x2="237.5" y2="22.1" class="s-fin"/><line x1="255" y1="50.1" x2="264" y2="34.5" class="s-fin"/><line x1="276.4" y1="65.1" x2="288" y2="51.3" class="s-fin"/><line x1="294.9" y1="83.6" x2="308.7" y2="72" class="s-fin"/><line x1="309.9" y1="105" x2="325.5" y2="96" class="s-fin"/><line x1="321" y1="128.7" x2="337.9" y2="122.5" class="s-fin"/><line x1="327.7" y1="154" x2="345.4" y2="150.8" class="s-fin"/><circle cx="180" cy="180" r="150" class="s-yoke"/><circle cx="180" cy="180" r="96" class="s-bore"/><rect x="174" y="44" width="12" height="36" rx="5" class="s-slot s-ph-a" transform="rotate(0 180 180)"/><rect x="174" y="44" width="12" height="36" rx="5" class="s-slot s-ph-a" transform="rotate(15 180 180)"/><rect x="174" y="44" width="12" height="36" rx="5" class="s-slot s-ph-b" transform="rotate(30 180 180)"/><rect x="174" y="44" width="12" height="36" rx="5" class="s-slot s-ph-b" transform="rotate(45 180 180)"/><rect x="174" y="44" width="12" height="36" rx="5" class="s-slot s-ph-c" transform="rotate(60 180 180)"/><rect x="174" y="44" width="12" height="36" rx="5" class="s-slot s-ph-c" transform="rotate(75 180 180)"/><rect x="174" y="44" width="12" height="36" rx="5" class="s-slot s-ph-a" transform="rotate(90 180 180)"/><rect x="174" y="44" width="12" height="36" rx="5" class="s-slot s-ph-a" transform="rotate(105 180 180)"/><rect x="174" y="44" width="12" height="36" rx="5" class="s-slot s-ph-b" transform="rotate(120 180 180)"/><rect x="174" y="44" width="12" height="36" rx="5" class="s-slot s-ph-b" transform="rotate(135 180 180)"/><rect x="174" y="44" width="12" height="36" rx="5" class="s-slot s-ph-c" transform="rotate(150 180 180)"/><rect x="174" y="44" width="12" height="36" rx="5" class="s-slot s-ph-c" transform="rotate(165 180 180)"/><rect x="174" y="44" width="12" height="36" rx="5" class="s-slot s-ph-a" transform="rotate(180 180 180)"/><rect x="174" y="44" width="12" height="36" rx="5" class="s-slot s-ph-a" transform="rotate(195 180 180)"/><rect x="174" y="44" width="12" height="36" rx="5" class="s-slot s-ph-b" transform="rotate(210 180 180)"/><rect x="174" y="44" width="12" height="36" rx="5" class="s-slot s-ph-b" transform="rotate(225 180 180)"/><rect x="174" y="44" width="12" height="36" rx="5" class="s-slot s-ph-c" transform="rotate(240 180 180)"/><rect x="174" y="44" width="12" height="36" rx="5" class="s-slot s-ph-c" transform="rotate(255 180 180)"/><rect x="174" y="44" width="12" height="36" rx="5" class="s-slot s-ph-a" transform="rotate(270 180 180)"/><rect x="174" y="44" width="12" height="36" rx="5" class="s-slot s-ph-a" transform="rotate(285 180 180)"/><rect x="174" y="44" width="12" height="36" rx="5" class="s-slot s-ph-b" transform="rotate(300 180 180)"/><rect x="174" y="44" width="12" height="36" rx="5" class="s-slot s-ph-b" transform="rotate(315 180 180)"/><rect x="174" y="44" width="12" height="36" rx="5" class="s-slot s-ph-c" transform="rotate(330 180 180)"/><rect x="174" y="44" width="12" height="36" rx="5" class="s-slot s-ph-c" transform="rotate(345 180 180)"/><circle cx="280.4" cy="280.4" r="5" class="s-bolt"/><circle cx="79.6" cy="280.4" r="5" class="s-bolt"/><circle cx="79.6" cy="79.6" r="5" class="s-bolt"/><circle cx="280.4" cy="79.6" r="5" class="s-bolt"/></svg><svg class="deco-rotor spin-deco" width="360" height="360" viewBox="0 0 360 360" aria-hidden="true"><circle cx="180" cy="180" r="90" class="r-core"/><circle cx="256" cy="180" r="6" class="r-bar"/><circle cx="251.4" cy="206" r="6" class="r-bar"/><circle cx="238.2" cy="228.9" r="6" class="r-bar"/><circle cx="218" cy="245.8" r="6" class="r-bar"/><circle cx="193.2" cy="254.8" r="6" class="r-bar"/><circle cx="166.8" cy="254.8" r="6" class="r-bar"/><circle cx="142" cy="245.8" r="6" class="r-bar"/><circle cx="121.8" cy="228.9" r="6" class="r-bar"/><circle cx="108.6" cy="206" r="6" class="r-bar"/><circle cx="104" cy="180" r="6" class="r-bar"/><circle cx="108.6" cy="154" r="6" class="r-bar"/><circle cx="121.8" cy="131.1" r="6" class="r-bar"/><circle cx="142" cy="114.2" r="6" class="r-bar"/><circle cx="166.8" cy="105.2" r="6" class="r-bar"/><circle cx="193.2" cy="105.2" r="6" class="r-bar"/><circle cx="218" cy="114.2" r="6" class="r-bar"/><circle cx="238.2" cy="131.1" r="6" class="r-bar"/><circle cx="251.4" cy="154" r="6" class="r-bar"/><circle cx="180" cy="180" r="40" class="r-ring"/><circle cx="180" cy="180" r="22" class="r-shaft"/><rect x="175" y="154" width="10" height="10" rx="1.5" class="r-key"/></svg></div>
+    </div>
+</div>
+
 <!-- Логотип -->
 <div class="logo-container" id="logoContainer">
-    <div class="logo">⚡</div>
+    <div class="logo"><svg class="logo-ico" aria-hidden="true"><use href="#ico-motor"/></svg></div>
     <span class="logo-text">РЕМОНТ ЭД</span>
 </div>
 
 <!-- Индикатор загрузки -->
-<div class="loading" id="loading"><div class="spinner"></div></div>
+<div class="loading" id="loading"><div class="spinner-wrap"><div class="spinner"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-gear"/></svg></div></div></div>
 
 <!-- ================== ЭКРАН ВХОДА ================== -->
 <div class="login-screen" id="loginScreen">
     <div class="login-box">
+        <svg class="login-hero" viewBox="0 0 320 170" role="img" aria-label="Асинхронный электродвигатель">
+            <defs>
+                <linearGradient id="hBody" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0" stop-color="#5a6799"/><stop offset="0.28" stop-color="#3a4572"/>
+                    <stop offset="0.45" stop-color="#4c5888"/><stop offset="1" stop-color="#1b2140"/>
+                </linearGradient>
+                <linearGradient id="hDark" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0" stop-color="#4a5482"/><stop offset="0.4" stop-color="#2c3459"/>
+                    <stop offset="1" stop-color="#181d38"/>
+                </linearGradient>
+                <linearGradient id="hOrange" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0" stop-color="#f39c12"/><stop offset="1" stop-color="#e74c3c"/>
+                </linearGradient>
+                <linearGradient id="hShaft" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0" stop-color="#f2f5fa"/><stop offset="0.5" stop-color="#aab4c8"/>
+                    <stop offset="1" stop-color="#6e7a94"/>
+                </linearGradient>
+                <radialGradient id="hGlow" cx="0.5" cy="0.55" r="0.5">
+                    <stop offset="0" stop-color="#f39c12" stop-opacity="0.32"/>
+                    <stop offset="1" stop-color="#f39c12" stop-opacity="0"/>
+                </radialGradient>
+            </defs>
+            <ellipse cx="165" cy="92" rx="155" ry="72" fill="url(#hGlow)"/>
+            <ellipse cx="164" cy="156" rx="118" ry="6" fill="#000" opacity="0.35"/>
+            <!-- лапы и опорная плита -->
+            <path d="M102 120h28l4 26h-36z M198 120h28l4 26h-36z" fill="#2a3256"/>
+            <rect x="88" y="144" width="156" height="7" rx="2" fill="#20274a"/>
+            <!-- рым-болт -->
+            <path d="M112 40v-6" stroke="#8e9ab3" stroke-width="4"/>
+            <circle cx="112" cy="27" r="7" fill="none" stroke="#8e9ab3" stroke-width="3.5"/>
+            <!-- вал со шпонкой и стрелка направления вращения -->
+            <rect x="26" y="76" width="44" height="18" rx="3" fill="url(#hShaft)"/>
+            <rect x="34" y="72.5" width="20" height="5" rx="1.5" fill="#c9d1e0"/>
+            <ellipse cx="26" cy="85" rx="3.5" ry="9" fill="#d5dbe6"/>
+            <g class="hero-rot">
+                <path d="M32 69 A17 17 0 1 0 32 101" fill="none" stroke="#f39c12" stroke-width="2.5" stroke-linecap="round"/>
+                <path d="M38 101 l-8 -4.5 v9z" fill="#f39c12"/>
+            </g>
+            <!-- передний подшипниковый щит -->
+            <rect x="64" y="46" width="26" height="78" rx="8" fill="url(#hDark)"/>
+            <rect x="68" y="52" width="6" height="66" rx="3" fill="#fff" opacity="0.06"/>
+            <!-- корпус с рёбрами охлаждения -->
+            <rect x="86" y="38" width="150" height="94" rx="10" fill="url(#hBody)"/>
+            <path d="M96 49H226M96 58H226M96 67H226M96 76H226M96 85H226M96 94H226M96 103H226M96 112H226M96 121H226" stroke="#151a33" stroke-width="2.2"/>
+            <path d="M96 51H226M96 60H226M96 69H226M96 78H226M96 87H226M96 96H226M96 105H226M96 114H226M96 123H226" stroke="#fff" stroke-opacity="0.07" stroke-width="1.2"/>
+            <!-- табличка -->
+            <rect x="148" y="73" width="46" height="28" rx="2.5" fill="#d7dde8"/>
+            <text x="153" y="85" font-size="8.5" font-weight="700" fill="#1a1a2e">АИР</text>
+            <text x="153" y="96" font-size="6.5" fill="#1a1a2e">380 В 3~</text>
+            <circle cx="151" cy="76" r="1" fill="#7d889f"/><circle cx="191" cy="76" r="1" fill="#7d889f"/>
+            <circle cx="151" cy="98" r="1" fill="#7d889f"/><circle cx="191" cy="98" r="1" fill="#7d889f"/>
+            <!-- кожух вентилятора -->
+            <rect x="232" y="44" width="48" height="82" rx="16" fill="url(#hDark)"/>
+            <path d="M244 58v54M252 58v54M260 58v54M268 58v54" stroke="#12162b" stroke-width="3.5" stroke-linecap="round"/>
+            <!-- клеммная коробка, кабель и «ток» -->
+            <path d="M200 28 C 232 28, 240 8, 272 8 S 306 14, 320 6" fill="none" stroke="#2c3459" stroke-width="6" stroke-linecap="round"/>
+            <path d="M200 28 C 232 28, 240 8, 272 8 S 306 14, 320 6" fill="none" stroke="#e74c3c" stroke-width="3"/>
+            <path class="hero-flow" d="M200 28 C 232 28, 240 8, 272 8 S 306 14, 320 6" fill="none" stroke="#ffd27a" stroke-width="3" stroke-linecap="round"/>
+            <rect x="126" y="38" width="68" height="5" rx="2" fill="#c0392b"/>
+            <rect x="130" y="14" width="60" height="28" rx="5" fill="url(#hOrange)"/>
+            <rect x="190" y="22" width="10" height="12" rx="2" fill="#8e9ab3"/>
+            <path d="M163 18l-9 13h7l-3 9 10-14h-7l3-8z" fill="#fff"/>
+        </svg>
         <h1>⚡ Вход в систему</h1>
         <p>Заявки на ремонт электродвигателей</p>
+        <div class="hero-specs" aria-hidden="true"><span>3~ 380 В</span><span>50 Гц</span><span>IP54</span></div>
         <div class="input-group">
             <label for="password">Пароль</label>
             <div class="pass-field">
@@ -435,7 +636,7 @@ td select option { background: #1a1a2e; color: #fff; }
 <!-- ================== ГЛАВНЫЙ ЭКРАН ================== -->
 <div class="main-screen" id="mainScreen">
     <div class="header">
-        <h1>⚡ Заявка на ремонт электродвигателей</h1>
+        <h1><svg class="hdr-icon" aria-hidden="true"><use href="#ico-motor"/></svg> Заявка на ремонт электродвигателей</h1>
         <div class="header-buttons">
             <button class="btn btn-secondary" onclick="showHistory()">📋 История</button>
             <button class="btn btn-secondary" id="settingsBtn" style="display:none;" onclick="showSettings()">⚙ Справочники</button>
@@ -794,6 +995,7 @@ function login() {
             document.getElementById('loginScreen').style.display = 'none';
             document.getElementById('mainScreen').style.display = 'block';
             document.getElementById('logoContainer').style.display = 'flex';
+            document.body.classList.add('app-on');
             document.getElementById('settingsBtn').style.display = isAdmin ? 'inline-flex' : 'none';
 
             initForm();
@@ -823,6 +1025,7 @@ function logout() {
     document.getElementById('loginScreen').style.display = 'flex';
     document.getElementById('mainScreen').style.display = 'none';
     document.getElementById('logoContainer').style.display = 'none';
+    document.body.classList.remove('app-on');
     document.getElementById('settingsBtn').style.display = 'none';
     document.getElementById('password').value = '';
     setPassVisible(false);
@@ -1416,7 +1619,7 @@ function appendHistoryRows(data, reset) {
     var tbody = document.getElementById('historyTable');
 
     if (reset && (!data || data.length === 0)) {
-        tbody.innerHTML = '<tr><td colspan="12" class="empty-state">Заявки не найдены. Измените условия поиска.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="12" class="empty-state"><div class="empty-inner"><svg class="empty-ico" aria-hidden="true"><use href="#ico-motor"/></svg>Заявки не найдены. Измените условия поиска.</div></td></tr>';
         return;
     }
     if (!data || data.length === 0) return;
