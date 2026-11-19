@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!-- ============================================================
      ЗАЯВКИ НА РЕМОНТ ЭЛЕКТРОДВИГАТЕЛЕЙ
-     Клиентская часть. Версия 3.1 (оформление в стиле электродвигателей)
+     Клиентская часть. Версия 3.2 (устойчивая связь, оформление в стиле электродвигателей)
      Требует серверный скрипт Code.gs версии 3.0 или новее
      ============================================================ -->
 <html lang="ru">
@@ -502,6 +502,25 @@ td select option { background: #1a1a2e; color: #fff; }
     color: #f39c12;
 }
 .loading .spinner svg { display: block; width: 100%; height: 100%; }
+.loading { flex-direction: column; gap: 18px; }
+.loading-text {
+    color: #e3e7f0; font-size: 15px; text-align: center;
+    max-width: 340px; min-height: 20px; padding: 0 16px;
+}
+
+/* ---------- Индикатор связи ---------- */
+.conn-pill {
+    display: inline-flex; align-items: center; gap: 8px; align-self: center;
+    padding: 7px 14px; border-radius: 20px; font-size: 13px; white-space: nowrap;
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14);
+    color: #cfd5e2; cursor: default;
+}
+.conn-dot { width: 9px; height: 9px; border-radius: 50%; background: #95a5a6; flex: none; }
+.conn-ok      .conn-dot { background: #2ecc71; box-shadow: 0 0 8px rgba(46,204,113,0.7); }
+.conn-slow    .conn-dot { background: #f39c12; box-shadow: 0 0 8px rgba(243,156,18,0.7); }
+.conn-offline .conn-dot { background: #e74c3c; box-shadow: 0 0 8px rgba(231,76,60,0.7); }
+.conn-offline { border-color: rgba(231,76,60,0.5); color: #f1a29a; }
+.conn-slow    { border-color: rgba(243,156,18,0.45); }
 
 @media (max-width: 768px) {
     .deco-tr { transform: scale(0.6); transform-origin: top right; }
@@ -550,7 +569,7 @@ td select option { background: #1a1a2e; color: #fff; }
 </div>
 
 <!-- Индикатор загрузки -->
-<div class="loading" id="loading"><div class="spinner-wrap"><div class="spinner"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-gear"/></svg></div></div></div>
+<div class="loading" id="loading"><div class="spinner-wrap"><div class="spinner"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-gear"/></svg></div></div><div class="loading-text" id="loadingText" role="status" aria-live="polite"></div></div>
 
 <!-- ================== ЭКРАН ВХОДА ================== -->
 <div class="login-screen" id="loginScreen">
@@ -638,6 +657,7 @@ td select option { background: #1a1a2e; color: #fff; }
     <div class="header">
         <h1><svg class="hdr-icon" aria-hidden="true"><use href="#ico-motor"/></svg> Заявка на ремонт электродвигателей</h1>
         <div class="header-buttons">
+            <span class="conn-pill conn-unknown" id="connStatus" role="status" aria-live="polite"><span class="conn-dot"></span><span id="connText">Проверка связи…</span></span>
             <button class="btn btn-secondary" onclick="showHistory()">📋 История</button>
             <button class="btn btn-secondary" id="settingsBtn" style="display:none;" onclick="showSettings()">⚙ Справочники</button>
             <button type="button" class="btn btn-secondary" onclick="location.href='https://energo380.github.io/menu/'" title="Вернуться в меню рабочих сервисов">🏠 Сервисы</button>
@@ -832,16 +852,31 @@ var API_URL = 'https://script.google.com/macros/s/AKfycbyOBekvdpYEJwE6GCF2Ceaxqo
 var MAX_TEXT_LENGTH = 30;
 var INV_LENGTH = 5;
 var PAGE_SIZE = 30;
-var REQUEST_TIMEOUT_MS = 25000;
+var REQUEST_TIMEOUT_MS = 30000;         // чтение (вход, история)
+var SUBMIT_TIMEOUT_MS = 50000;          // запись: сервер может ждать блокировку до 25 с
+var SLOW_RESPONSE_MS = 5000;            // ответ дольше — связь «медленная»
 
 var QUEUE_KEY = 'motorRepair_queue_v3';
 var DRAFT_KEY = 'motorRepair_draft_v3';
+var SESSION_KEY = 'motorRepair_session_v1';        // справочники + отпечатки паролей
+var SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // запомненный вход действует 30 дней
 var QUEUE_MAX = 3;                      // одновременно неотправленных заявок
 var SENT_KEEP_MS = 60 * 60 * 1000;      // отправленные видны 1 час
-var RETRY_DELAYS = [5000, 15000, 60000, 300000];
+var RETRY_DELAYS = [3000, 10000, 30000, 60000, 120000];
+
+var CONN_TICK_MS = 20000;               // как часто проверять связь, если её нет
+var KEEPALIVE_MS = 4 * 60 * 1000;       // «будить» сервер, если не было обмена 4 мин
+var VALIDATE_RETRY_MS = 30000;          // повтор фоновой проверки пароля
 
 var currentPassword = '';
+var currentFp = '';                     // отпечаток пароля (SHA-256), сам пароль не хранится
+var sessionConfirmed = false;           // сервер подтвердил пароль в этом сеансе
 var isAdmin = false;
+
+var connState = { status: 'unknown', lastMs: 0, lastOkAt: 0, lastContactAt: 0 };
+var probing = false;
+var validating = false;
+var validateTimer = null;
 var settings = { departments: [], locations: [], powers: [], speeds: [], manufacturers: [] };
 
 var queue = [];
@@ -886,8 +921,18 @@ function generateClientId() {
     return Date.now() + '-' + rnd;
 }
 
-function showLoading() { document.getElementById('loading').style.display = 'flex'; }
-function hideLoading() { document.getElementById('loading').style.display = 'none'; }
+function showLoading(text) {
+    setLoadingText(text || '');
+    document.getElementById('loading').style.display = 'flex';
+}
+function hideLoading() {
+    document.getElementById('loading').style.display = 'none';
+    setLoadingText('');
+}
+function setLoadingText(text) {
+    var el = document.getElementById('loadingText');
+    if (el) el.textContent = text || '';
+}
 
 function showNotification(message, type) {
     var existing = document.querySelector('.notification');
@@ -912,18 +957,35 @@ function updateDateTime() {
    Один транспорт: POST + text/plain (без preflight, CORS не мешает)
    ============================================================ */
 
+/**
+ * Ошибка связи (обрыв, тайм-аут, сбой Google) помечается retryable = true —
+ * такой запрос имеет смысл повторить. Ответ сервера с success:false — не ошибка связи.
+ */
+function netError(message, retryable) {
+    var e = new Error(message);
+    e.retryable = retryable === true;
+    return e;
+}
+
 function apiCall(action, payload, options) {
     options = options || {};
     var password = (options.password !== undefined) ? options.password : currentPassword;
     var timeout = options.timeout || REQUEST_TIMEOUT_MS;
 
+    if (navigator.onLine === false) {
+        setConn('offline');
+        return Promise.reject(netError('Нет подключения к сети', true));
+    }
+
     var controller = null;
     var timer = null;
+    var started = Date.now();
     var fetchOptions = {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ action: action, password: password, payload: payload || {} }),
-        redirect: 'follow'
+        redirect: 'follow',
+        cache: 'no-store'
     };
 
     if (typeof AbortController !== 'undefined') {
@@ -934,32 +996,232 @@ function apiCall(action, payload, options) {
 
     return fetch(API_URL, fetchOptions)
         .then(function (response) {
-            if (timer) clearTimeout(timer);
-            if (!response.ok) throw new Error('Сервер вернул код ' + response.status);
+            if (!response.ok) {
+                // 5xx и 429 у Google — временные сбои, их повторяем
+                var temp = response.status >= 500 || response.status === 429;
+                throw netError('Сервер вернул код ' + response.status, temp);
+            }
             return response.text();
         })
         .then(function (text) {
+            if (timer) clearTimeout(timer);
+            var data;
             try {
-                return JSON.parse(text);
+                data = JSON.parse(text);
             } catch (e) {
-                throw new Error('Сервер вернул неожиданный ответ. Проверьте развёртывание скрипта.');
+                // Google иногда отдаёт HTML-страницу «временно недоступно»
+                throw netError('Сервер вернул неожиданный ответ. Если повторяется — проверьте развёртывание скрипта.', true);
             }
+            var ms = Date.now() - started;
+            setConn(ms > SLOW_RESPONSE_MS ? 'slow' : 'ok', ms);
+            return data;
         })
         .catch(function (error) {
             if (timer) clearTimeout(timer);
             if (error && error.name === 'AbortError') {
-                throw new Error('Превышено время ожидания сервера');
+                setConn('offline');
+                throw netError('Превышено время ожидания сервера', true);
             }
             if (error instanceof TypeError) {
-                throw new Error('Нет связи с сервером');
+                setConn('offline');
+                throw netError('Нет связи с сервером', true);
             }
+            if (error && error.retryable) setConn('offline');
             throw error;
         });
+}
+
+/**
+ * То же, что apiCall, но при ошибке связи повторяет запрос.
+ * Только для безопасных запросов (чтение, полная перезапись справочников).
+ * onRetry(номерПопытки, всегоПопыток) — чтобы показать пользователю, что идёт повтор.
+ */
+function apiCallRetry(action, payload, options, attempts, onRetry) {
+    attempts = attempts || 3;
+    var delays = [1500, 4000, 8000];
+
+    function attempt(n) {
+        return apiCall(action, payload, options).catch(function (error) {
+            if (!error.retryable || n >= attempts || navigator.onLine === false) throw error;
+            if (onRetry) onRetry(n + 1, attempts);
+            return new Promise(function (resolve) {
+                setTimeout(resolve, delays[Math.min(n - 1, delays.length - 1)]);
+            }).then(function () { return attempt(n + 1); });
+        });
+    }
+    return attempt(1);
+}
+
+/**
+ * Лёгкий запрос без чтения ответа: «будит» сервер Google и проверяет, что он доступен.
+ * Ответ непрозрачный (no-cors), поэтому годится только как «есть связь / нет связи».
+ */
+function probeServer() {
+    if (navigator.onLine === false) return Promise.resolve(false);
+    var controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var timer = controller ? setTimeout(function () { controller.abort(); }, 15000) : null;
+    var opts = { method: 'GET', mode: 'no-cors', cache: 'no-store' };
+    if (controller) opts.signal = controller.signal;
+    return fetch(API_URL + '?ping=' + Date.now(), opts)
+        .then(function () { if (timer) clearTimeout(timer); return true; })
+        .catch(function () { if (timer) clearTimeout(timer); return false; });
+}
+
+/* ---------- Индикатор связи ---------- */
+
+function setConn(status, ms) {
+    var prev = connState.status;
+    var now = Date.now();
+    connState.status = status;
+    if (status === 'ok' || status === 'slow') {
+        connState.lastOkAt = now;
+        connState.lastContactAt = now;
+        if (ms) connState.lastMs = ms;
+    }
+    renderConn();
+    if (prev === 'offline' && (status === 'ok' || status === 'slow')) onConnectionBack();
+}
+
+function renderConn() {
+    var el = document.getElementById('connStatus');
+    if (!el) return;
+    var s = connState.status;
+    var text = { ok: 'Связь есть', slow: 'Связь медленная', offline: 'Нет связи', unknown: 'Проверка связи…' }[s] || '';
+    var title = '';
+    if (connState.lastOkAt) {
+        title = 'Последний ответ сервера в ' + formatTimeOnly(connState.lastOkAt);
+        if (connState.lastMs) title += ' за ' + (connState.lastMs / 1000).toFixed(1).replace('.', ',') + ' с';
+    }
+    if (s === 'offline') title += (title ? '. ' : '') + 'Заявки сохраняются и уйдут, когда связь появится.';
+    el.className = 'conn-pill conn-' + s;
+    document.getElementById('connText').textContent = text;
+    el.title = title;
+}
+
+/** Связь вернулась: сразу отправить ждущие заявки и, если надо, подтвердить пароль */
+function onConnectionBack() {
+    wakeQueue(['NETWORK']);
+    if (currentPassword && !sessionConfirmed) validateSession();
+    processQueue();
+}
+
+/** Снимает ожидание повтора у заявок с указанными кодами ошибки */
+function wakeQueue(codes) {
+    var woke = false;
+    for (var i = 0; i < queue.length; i++) {
+        var q = queue[i];
+        if (q.status === 'error' && codes.indexOf(q.lastCode) !== -1) {
+            q.nextAttemptAt = 0;
+            woke = true;
+        }
+    }
+    if (woke) { saveQueue(); renderQueue(); }
+}
+
+/** Раз в 20 с: если связи нет — проверяем, не появилась ли; если долго тихо — «будим» сервер */
+function connTick(force) {
+    if (!currentPassword || probing) return;
+    if (document.hidden && !force) return;
+
+    var idle = Date.now() - connState.lastContactAt;
+    if (!force && connState.status !== 'offline' && idle < KEEPALIVE_MS) return;
+
+    probing = true;
+    probeServer().then(function (ok) {
+        probing = false;
+        if (ok) {
+            connState.lastContactAt = Date.now();
+            // по непрозрачному ответу скорость не измерить — оставляем прежнюю оценку
+            if (connState.status === 'offline' || connState.status === 'unknown') setConn('ok');
+        } else {
+            setConn('offline');
+        }
+    });
 }
 
 /* ============================================================
    БЛОК 4: АВТОРИЗАЦИЯ
    ============================================================ */
+
+/* ---------- Запомненный вход ----------
+   После первого успешного входа на этом компьютере запоминаются справочники
+   и SHA-256-отпечаток пароля (не сам пароль). Следующий вход — мгновенный,
+   без ожидания сервера; пароль проверяется сервером в фоне. Если пароль
+   отключат в таблице, при первой связи пользователя выведет на экран входа.
+   Заявки в любом случае проверяются сервером при отправке. */
+
+function passwordFingerprint(password) {
+    try {
+        if (!window.crypto || !window.crypto.subtle || typeof TextEncoder === 'undefined') {
+            return Promise.resolve('');
+        }
+        return window.crypto.subtle.digest('SHA-256', new TextEncoder().encode('drivremont:' + password))
+            .then(function (buf) {
+                var bytes = new Uint8Array(buf), hex = '';
+                for (var i = 0; i < bytes.length; i++) hex += ('0' + bytes[i].toString(16)).slice(-2);
+                return hex;
+            })
+            .catch(function () { return ''; });
+    } catch (e) {
+        return Promise.resolve('');
+    }
+}
+
+function readSessionStore() {
+    try {
+        var data = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null');
+        if (data && typeof data === 'object' && data.users) return data;
+    } catch (e) {}
+    return { settings: null, users: {} };
+}
+
+function writeSessionStore(data) {
+    try { localStorage.setItem(SESSION_KEY, JSON.stringify(data)); } catch (e) {}
+}
+
+function getCachedSession(fp) {
+    if (!fp) return null;
+    var data = readSessionStore();
+    var user = data.users[fp];
+    if (!user || !data.settings) return null;
+    if (Date.now() - (user.at || 0) > SESSION_MAX_AGE_MS) return null;
+    return { settings: data.settings, isAdmin: user.isAdmin === true };
+}
+
+function saveSession(fp, s, admin) {
+    if (!fp) return;
+    var data = readSessionStore();
+    var now = Date.now();
+    data.settings = s;
+    data.users[fp] = { isAdmin: admin === true, at: now };
+    // убираем устаревшие отпечатки
+    for (var k in data.users) {
+        if (now - (data.users[k].at || 0) > SESSION_MAX_AGE_MS) delete data.users[k];
+    }
+    writeSessionStore(data);
+}
+
+function updateCachedSettings(s) {
+    var data = readSessionStore();
+    if (!data.settings) return;
+    data.settings = s;
+    writeSessionStore(data);
+}
+
+function forgetFingerprint(fp) {
+    var data = readSessionStore();
+    if (data.users[fp]) { delete data.users[fp]; writeSessionStore(data); }
+}
+
+function settingsFromResult(result) {
+    return {
+        departments: result.departments || [],
+        locations: result.locations || [],
+        powers: result.powers || [],
+        speeds: result.speeds || [],
+        manufacturers: result.manufacturers || []
+    };
+}
 
 function login() {
     var password = document.getElementById('password').value.trim();
@@ -970,57 +1232,137 @@ function login() {
 
     var btn = document.getElementById('loginBtn');
     btn.disabled = true;
-    showLoading();
 
-    apiCall('getSettings', {}, { password: password })
-        .then(function (result) {
-            hideLoading();
+    passwordFingerprint(password).then(function (fp) {
+        // 1. Этот пароль уже входил на этом компьютере — пускаем сразу
+        var cached = getCachedSession(fp);
+        if (cached) {
             btn.disabled = false;
+            currentPassword = password;
+            currentFp = fp;
+            enterApp(cached.settings, cached.isAdmin, false);
+            validateSession();
+            return;
+        }
+
+        // 2. Первый вход — нужен сервер. Повторяем при плохой связи.
+        showLoading('Подключение к серверу…');
+        var slowTimer = setTimeout(function () {
+            setLoadingText('Сервер Google просыпается, это может занять до 30 секунд…');
+        }, 6000);
+
+        apiCallRetry('getSettings', {}, { password: password }, 3, function (n, total) {
+            setLoadingText('Связь плохая, попытка ' + n + ' из ' + total + '…');
+        })
+            .then(function (result) {
+                clearTimeout(slowTimer);
+                hideLoading();
+                btn.disabled = false;
+
+                if (!result.success) {
+                    showNotification(result.error || 'Неверный пароль', 'error');
+                    return;
+                }
+
+                currentPassword = password;
+                currentFp = fp;
+                var s = settingsFromResult(result);
+                saveSession(fp, s, result.isAdmin === true);
+                enterApp(s, result.isAdmin === true, true);
+            })
+            .catch(function (error) {
+                clearTimeout(slowTimer);
+                hideLoading();
+                btn.disabled = false;
+                var hint = error.retryable
+                    ? '. Первый вход на этом компьютере требует связи с сервером — попробуйте ещё раз.'
+                    : '';
+                showNotification(error.message + hint, 'error');
+            });
+    });
+}
+
+/** Показ главного экрана. confirmed = false — вошли по запомненному паролю, сервер ещё не подтвердил */
+function enterApp(s, admin, confirmed) {
+    settings = s;
+    isAdmin = admin === true;
+    sessionConfirmed = confirmed === true;
+
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('mainScreen').style.display = 'block';
+    document.getElementById('logoContainer').style.display = 'flex';
+    document.body.classList.add('app-on');
+    document.getElementById('settingsBtn').style.display = isAdmin ? 'inline-flex' : 'none';
+
+    initForm();
+    restoreDraft();
+    if (sessionConfirmed) wakeQueue(['AUTH', 'NETWORK']);
+    renderQueue();
+    renderConn();
+    processQueue();
+
+    showNotification('Добро пожаловать!', 'success');
+}
+
+/**
+ * Фоновая проверка пароля и обновление справочников.
+ * Нет связи — тихо повторяем позже, работать с формой это не мешает.
+ */
+function validateSession() {
+    if (!currentPassword || validating) return;
+    clearTimeout(validateTimer);
+    validating = true;
+    var pw = currentPassword;
+
+    apiCallRetry('getSettings', {}, { password: pw }, 2)
+        .then(function (result) {
+            validating = false;
+            if (currentPassword !== pw) return; // успели выйти
 
             if (!result.success) {
-                showNotification(result.error || 'Неверный пароль', 'error');
+                if (result.code === 'AUTH') {
+                    forgetFingerprint(currentFp);
+                    logout(true);
+                    showNotification('Пароль больше не действует. Войдите с актуальным паролем — черновик и очередь сохранены.', 'error');
+                } else {
+                    validateTimer = setTimeout(validateSession, VALIDATE_RETRY_MS);
+                }
                 return;
             }
 
-            currentPassword = password;
+            sessionConfirmed = true;
             isAdmin = result.isAdmin === true;
-            settings = {
-                departments: result.departments || [],
-                locations: result.locations || [],
-                powers: result.powers || [],
-                speeds: result.speeds || [],
-                manufacturers: result.manufacturers || []
-            };
-
-            document.getElementById('loginScreen').style.display = 'none';
-            document.getElementById('mainScreen').style.display = 'block';
-            document.getElementById('logoContainer').style.display = 'flex';
-            document.body.classList.add('app-on');
             document.getElementById('settingsBtn').style.display = isAdmin ? 'inline-flex' : 'none';
+            wakeQueue(['AUTH', 'NETWORK']); // пароль подтверждён — отправляем отложенное
 
-            initForm();
-            restoreDraft();
-            renderQueue();
+            var s = settingsFromResult(result);
+            var changed = JSON.stringify(s) !== JSON.stringify(settings);
+            saveSession(currentFp, s, isAdmin);
+            if (changed) {
+                settings = s;
+                refreshFormSelects();
+            }
             processQueue();
-
-            showNotification('Добро пожаловать!', 'success');
         })
-        .catch(function (error) {
-            hideLoading();
-            btn.disabled = false;
-            showNotification(error.message, 'error');
+        .catch(function () {
+            validating = false;
+            if (currentPassword === pw) validateTimer = setTimeout(validateSession, VALIDATE_RETRY_MS);
         });
 }
 
-function logout() {
+function logout(force) {
     var pendingCount = queue.filter(function (it) { return it.status !== 'sent'; }).length;
-    if (pendingCount > 0) {
+    if (pendingCount > 0 && force !== true) {
         if (!confirm('В очереди есть неотправленные заявки (' + pendingCount + ' шт.). Они сохранятся и будут отправлены при следующем входе. Выйти?')) {
             return;
         }
     }
 
+    saveDraft(); // форма не теряется, даже если выход вынужденный
+    clearTimeout(validateTimer);
     currentPassword = '';
+    currentFp = '';
+    sessionConfirmed = false;
     isAdmin = false;
     document.getElementById('loginScreen').style.display = 'flex';
     document.getElementById('mainScreen').style.display = 'none';
@@ -1245,6 +1587,7 @@ function findQueueItem(clientId) {
 function processQueue() {
     if (queueBusy) return;
     if (!currentPassword) return;
+    if (navigator.onLine === false) { setConn('offline'); return; } // не тратим попытки впустую
 
     var now = Date.now();
     var item = null;
@@ -1271,7 +1614,7 @@ function processQueue() {
         responsible: item.responsible,
         phone: item.phone,
         items: item.items
-    })
+    }, { timeout: SUBMIT_TIMEOUT_MS })
         .then(function (result) {
             if (result && result.success) {
                 item.status = 'sent';
@@ -1284,10 +1627,12 @@ function processQueue() {
             } else {
                 var msg = (result && result.error) ? result.error : 'Сервер не принял заявку';
                 markQueueError(item, msg, result && result.code);
+                if (result && result.code === 'AUTH') setTimeout(validateSession, 0);
             }
         })
         .catch(function (error) {
-            markQueueError(item, error.message || 'Ошибка отправки', 'NETWORK');
+            // Повтор безопасен: сервер узнаёт заявку по clientId и не создаёт дубль
+            markQueueError(item, error.message || 'Ошибка отправки', error.retryable === false ? 'SERVER' : 'NETWORK');
         })
         .then(function () {
             queueBusy = false;
@@ -1301,9 +1646,11 @@ function markQueueError(item, message, code) {
     item.status = 'error';
     item.attempts = (item.attempts || 0) + 1;
     item.lastError = message;
+    item.lastCode = code || '';
 
-    // Ошибки данных повторять бессмысленно — ждём вмешательства пользователя
-    if (code === 'VALIDATION' || code === 'BAD_REQUEST') {
+    // Ошибки данных и пароля повторять бессмысленно — ждём вмешательства пользователя
+    if (code === 'VALIDATION' || code === 'BAD_REQUEST' || code === 'AUTH') {
+        if (code === 'AUTH') item.lastError = 'Сервер не принял пароль. Войдите с актуальным паролем и нажмите «Отправить сейчас».';
         item.nextAttemptAt = Date.now() + 24 * 60 * 60 * 1000;
     } else {
         var idx = Math.min(item.attempts - 1, RETRY_DELAYS.length - 1);
@@ -1586,12 +1933,14 @@ function loadHistory(reset) {
         document.getElementById('historyTable').innerHTML = '';
     }
 
-    showLoading();
+    showLoading('Загрузка истории…');
 
-    apiCall('getHistory', {
+    apiCallRetry('getHistory', {
         filters: historyState.filters,
         offset: historyState.offset,
         limit: PAGE_SIZE
+    }, {}, 3, function (n, total) {
+        setLoadingText('Связь плохая, попытка ' + n + ' из ' + total + '…');
     })
         .then(function (result) {
             hideLoading();
@@ -1677,9 +2026,11 @@ function updateHistoryFooter() {
 
 function printHistory() {
     var filters = readFilters();
-    showLoading();
+    showLoading('Подготовка к печати…');
 
-    apiCall('getHistory', { filters: filters, offset: 0, limit: 0 }, { timeout: 60000 })
+    apiCallRetry('getHistory', { filters: filters, offset: 0, limit: 0 }, { timeout: 60000 }, 2, function (n, total) {
+        setLoadingText('Связь плохая, попытка ' + n + ' из ' + total + '…');
+    })
         .then(function (result) {
             hideLoading();
 
@@ -1860,9 +2211,12 @@ function saveSettings() {
 
     var btn = document.getElementById('saveSettingsBtn');
     btn.disabled = true;
-    showLoading();
+    showLoading('Сохранение справочников…');
 
-    apiCall('updateLists', { lists: settings })
+    // Справочники перезаписываются целиком, поэтому повтор безопасен
+    apiCallRetry('updateLists', { lists: settings }, {}, 3, function (n, total) {
+        setLoadingText('Связь плохая, попытка ' + n + ' из ' + total + '…');
+    })
         .then(function (result) {
             hideLoading();
             btn.disabled = false;
@@ -1873,6 +2227,7 @@ function saveSettings() {
             }
 
             showNotification('Справочники сохранены', 'success');
+            updateCachedSettings(settings);
             closeSettings();
             refreshFormSelects();
         })
@@ -1960,11 +2315,22 @@ document.addEventListener('DOMContentLoaded', function () {
     setInterval(queueTick, 1000);
     window.addEventListener('online', function () {
         showNotification('Связь восстановлена, продолжаю отправку', 'success');
+        connTick(true);
         processQueue();
     });
     window.addEventListener('offline', function () {
+        setConn('offline');
         showNotification('Связь потеряна. Заявки сохранены и уйдут автоматически', 'warning');
     });
+
+    // Связь: проверка каждые 20 с, если её нет; «пробуждение» сервера раз в 4 мин простоя
+    setInterval(connTick, CONN_TICK_MS);
+    document.addEventListener('visibilitychange', function () {
+        if (!document.hidden && currentPassword) { connTick(true); processQueue(); }
+    });
+
+    // Пока человек вводит пароль — заранее «будим» сервер Google (холодный старт)
+    probeServer();
 
     // Предупреждение при закрытии вкладки с неотправленными заявками
     window.addEventListener('beforeunload', function (e) {
