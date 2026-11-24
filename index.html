@@ -958,7 +958,7 @@ function updateDateTime() {
    ============================================================ */
 
 /**
- * Ошибка связи (обрыв, тайм-аут, сбой Google) помечается retryable = true —
+ * Ошибка связи (обрыв, тайм-аут, сбой сервера) помечается retryable = true —
  * такой запрос имеет смысл повторить. Ответ сервера с success:false — не ошибка связи.
  */
 function netError(message, retryable) {
@@ -997,7 +997,7 @@ function apiCall(action, payload, options) {
     return fetch(API_URL, fetchOptions)
         .then(function (response) {
             if (!response.ok) {
-                // 5xx и 429 у Google — временные сбои, их повторяем
+                // 5xx и 429 — временные сбои, их повторяем
                 var temp = response.status >= 500 || response.status === 429;
                 throw netError('Сервер вернул код ' + response.status, temp);
             }
@@ -1009,7 +1009,7 @@ function apiCall(action, payload, options) {
             try {
                 data = JSON.parse(text);
             } catch (e) {
-                // Google иногда отдаёт HTML-страницу «временно недоступно»
+                // Сервер иногда отдаёт HTML-страницу «временно недоступно»
                 throw netError('Сервер вернул неожиданный ответ. Если повторяется — проверьте развёртывание скрипта.', true);
             }
             var ms = Date.now() - started;
@@ -1053,7 +1053,7 @@ function apiCallRetry(action, payload, options, attempts, onRetry) {
 }
 
 /**
- * Лёгкий запрос без чтения ответа: «будит» сервер Google и проверяет, что он доступен.
+ * Лёгкий запрос без чтения ответа: «будит» сервер и проверяет, что он доступен.
  * Ответ непрозрачный (no-cors), поэтому годится только как «есть связь / нет связи».
  */
 function probeServer() {
@@ -1246,13 +1246,13 @@ function login() {
         }
 
         // 2. Первый вход — нужен сервер. Повторяем при плохой связи.
-        showLoading('Подключение к серверу…');
+        showLoading('Устанавливается связь…');
         var slowTimer = setTimeout(function () {
-            setLoadingText('Сервер Google просыпается, это может занять до 30 секунд…');
+            setLoadingText('Устанавливается связь, это может занять до 30 секунд…');
         }, 6000);
 
         apiCallRetry('getSettings', {}, { password: password }, 3, function (n, total) {
-            setLoadingText('Связь плохая, попытка ' + n + ' из ' + total + '…');
+            setLoadingText('Устанавливается связь, попытка ' + n + ' из ' + total + '…');
         })
             .then(function (result) {
                 clearTimeout(slowTimer);
@@ -1940,7 +1940,7 @@ function loadHistory(reset) {
         offset: historyState.offset,
         limit: PAGE_SIZE
     }, {}, 3, function (n, total) {
-        setLoadingText('Связь плохая, попытка ' + n + ' из ' + total + '…');
+        setLoadingText('Устанавливается связь, попытка ' + n + ' из ' + total + '…');
     })
         .then(function (result) {
             hideLoading();
@@ -2029,7 +2029,7 @@ function printHistory() {
     showLoading('Подготовка к печати…');
 
     apiCallRetry('getHistory', { filters: filters, offset: 0, limit: 0 }, { timeout: 60000 }, 2, function (n, total) {
-        setLoadingText('Связь плохая, попытка ' + n + ' из ' + total + '…');
+        setLoadingText('Устанавливается связь, попытка ' + n + ' из ' + total + '…');
     })
         .then(function (result) {
             hideLoading();
@@ -2215,7 +2215,7 @@ function saveSettings() {
 
     // Справочники перезаписываются целиком, поэтому повтор безопасен
     apiCallRetry('updateLists', { lists: settings }, {}, 3, function (n, total) {
-        setLoadingText('Связь плохая, попытка ' + n + ' из ' + total + '…');
+        setLoadingText('Устанавливается связь, попытка ' + n + ' из ' + total + '…');
     })
         .then(function (result) {
             hideLoading();
@@ -2329,7 +2329,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!document.hidden && currentPassword) { connTick(true); processQueue(); }
     });
 
-    // Пока человек вводит пароль — заранее «будим» сервер Google (холодный старт)
+    // Пока человек вводит пароль — заранее «будим» сервер (холодный старт)
     probeServer();
 
     // Предупреждение при закрытии вкладки с неотправленными заявками
